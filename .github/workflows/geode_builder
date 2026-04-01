@@ -1,0 +1,59 @@
+name: Build ANY Geode Mod
+
+on:
+  workflow_dispatch:
+    inputs:
+      mod_repo:
+        description: 'Mode repo'
+        required: true
+        type: string
+      mod_branch:
+        description: 'Вranch'
+        required: true
+        default: 'main'
+
+jobs:
+  build:
+    name: Build Mod from URL
+    runs-on: windows-latest
+
+    steps:
+      - name: Download and Install Geode CLI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir C:\geode-zip
+          gh release download -R geode-sdk/cli -p "*win*.zip" --dir C:\geode-zip
+          Expand-Archive C:\geode-zip\*.zip -DestinationPath C:\geode-cli
+          $GeodeDir = (Get-ChildItem -Path C:\geode-cli -Filter "geode.exe" -Recurse).Directory.FullName
+          echo "$GeodeDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Setup Geode Profile
+        run: |
+          mkdir C:\GeometryDash
+          geode profile add --name CI "C:\GeometryDash" win
+
+      - name: Setup Geode SDK
+        run: |
+          git clone --recursive https://github.com/geode-sdk/geode.git C:\geode-sdk
+          echo "GEODE_SDK=C:\geode-sdk" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      # ВОТ ОНО! То, что просил CMake. Скачиваем готовые бинарники ядра Geode
+      - name: Install SDK Binaries
+        run: |
+          geode sdk install-binaries
+
+      - name: Clone Mod Repository
+        run: |
+          git clone --recursive -b ${{ inputs.mod_branch }} ${{ inputs.mod_repo }} C:\ModSource
+
+      - name: Compile Mod
+        working-directory: C:\ModSource
+        run: |
+          geode build --platform windows --config Release
+
+      - name: Upload .geode File
+        uses: actions/upload-artifact@v4
+        with:
+          name: Compiled-Geode-Mod
+          path: C:\ModSource\build\**\*.geode
