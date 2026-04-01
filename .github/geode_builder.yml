@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       mod_repo:
-        description: 'your mod repo'
+        description: 'Mode repo'
         required: true
         type: string
       mod_branch:
-        description: 'Branch'
+        description: 'Вranch'
         required: true
         default: 'main'
 
@@ -33,10 +33,15 @@ jobs:
           mkdir C:\GeometryDash
           geode profile add --name CI "C:\GeometryDash" win
 
-      - name: Download Geode SDK
+      - name: Setup Geode SDK
         run: |
           git clone --recursive https://github.com/geode-sdk/geode.git C:\geode-sdk
           echo "GEODE_SDK=C:\geode-sdk" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      # ВОТ ОНО! То, что просил CMake. Скачиваем готовые бинарники ядра Geode
+      - name: Install SDK Binaries
+        run: |
+          geode sdk install-binaries
 
       - name: Clone Mod Repository
         run: |
