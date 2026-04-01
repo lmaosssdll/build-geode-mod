@@ -32,8 +32,6 @@ No need to fork, configure CI, or install anything locally.
 | 🔗 **Any repo** | Just paste a GitHub URL — no forking needed |
 | 🌿 **Any branch/tag** | Build from `main`, `dev`, `v1.0.0`, etc. |
 | 📦 **Auto SDK version** | Reads `mod.json` / `geode.json` and installs the correct Geode SDK |
-| 💾 **SDK caching** | Geode SDK is cached between builds — faster rebuilds |
-| 🔄 **CMake fallback** | If `geode build` fails, automatically tries raw CMake |
 | 📥 **Auto dependencies** | Runs `geode install` to fetch mod dependencies |
 | 🏷️ **Smart naming** | Artifact is named `mod-id-version` automatically |
 
