@@ -33,20 +33,27 @@ jobs:
           mkdir C:\GeometryDash
           geode profile add --name CI "C:\GeometryDash" win
 
-      - name: Setup Geode SDK
-        run: |
-          git clone --recursive https://github.com/geode-sdk/geode.git C:\geode-sdk
-          echo "GEODE_SDK=C:\geode-sdk" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-      # ВОТ ОНО! То, что просил CMake. Скачиваем готовые бинарники ядра Geode
-      - name: Install SDK Binaries
-        run: |
-          geode sdk install-binaries
-
       - name: Clone Mod Repository
         run: |
           git clone --recursive -b ${{ inputs.mod_branch }} ${{ inputs.mod_repo }} C:\ModSource
 
+      - name: Smart Geode SDK Setup
+        run: |
+          $jsonPath = if (Test-Path "C:\ModSource\geode.json") { "C:\ModSource\geode.json" } elseif (Test-Path "C:\ModSource\mod.json") { "C:\ModSource\mod.json" } else { throw "Файл mod.json не найден!" }
+          
+          $json = Get-Content $jsonPath -Raw | ConvertFrom-Json
+          $rawVersion = $json.geode
+          Write-Host "Мод требует версию Geode: $rawVersion"
+          $cleanVersion = $rawVersion -replace '[>=^~v\s]', ''
+          $tag = "v$cleanVersion"
+          Write-Host "Скачиваем исходники Geode версии: $tag"
+          git clone --recursive --branch $tag https://github.com/geode-sdk/geode.git C:\geode-sdk
+          echo "GEODE_SDK=C:\geode-sdk" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install SDK Binaries
+        run: |
+          geode sdk install-binaries
+!
       - name: Compile Mod
         working-directory: C:\ModSource
         run: |
