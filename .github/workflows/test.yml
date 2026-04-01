@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       mod_repo:
-        description: 'Ссылка на GitHub мода'
+        description: 'your mod repo'
         required: true
         type: string
       mod_branch:
-        description: 'Ветка мода'
+        description: 'Branch'
         required: true
         default: 'main'
 
@@ -28,11 +28,15 @@ jobs:
           $GeodeDir = (Get-ChildItem -Path C:\geode-cli -Filter "geode.exe" -Recurse).Directory.FullName
           echo "$GeodeDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      # ВОТ ТУТ НОВАЯ КОМАНДА! Проверь глазами, что она обновилась!
       - name: Setup Geode Profile
         run: |
           mkdir C:\GeometryDash
           geode profile add --name CI "C:\GeometryDash" win
+
+      - name: Download Geode SDK
+        run: |
+          git clone --recursive https://github.com/geode-sdk/geode.git C:\geode-sdk
+          echo "GEODE_SDK=C:\geode-sdk" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Clone Mod Repository
         run: |
