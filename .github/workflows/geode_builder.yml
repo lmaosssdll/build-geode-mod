@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       mod_repo:
-        description: 'Repo URL (https://github.com/user/mod)'
+        description: 'Mode repo'
         required: true
         type: string
       mod_branch:
-        description: 'Branch / Tag'
+        description: 'Branch'
         required: true
         default: 'main'
 
@@ -18,55 +18,6 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: Clone Mod Repository
-        run: |
-          git clone --recursive -b ${{ inputs.mod_branch }} ${{ inputs.mod_repo }} mod-source
-
-      - name: Parse Geode Version
-        id: parse
-        shell: python3 {0}
-        run: |
-          import json, re, os, sys
-
-          # Fix Windows encoding
-          sys.stdout.reconfigure(encoding='utf-8')
-
-          # Find mod.json or geode.json
-          data = None
-          for name in ["mod-source/mod.json", "mod-source/geode.json"]:
-              try:
-                  with open(name, encoding='utf-8') as f:
-                      data = json.load(f)
-                  print(f"Found: {name}")
-                  break
-              except FileNotFoundError:
-                  continue
-
-          if data is None:
-              raise FileNotFoundError("No mod.json or geode.json found!")
-
-          raw = data.get("geode", "")
-          mod_id = data.get("id", "unknown-mod")
-          mod_version = data.get("version", "0.0.0")
-
-          # Clean version: ">=3.4.0" -> "3.4.0"
-          clean = re.sub(r'[>=<^~\s]', '', raw)
-          # Remove leading 'v' if present to avoid "vv1.0.0"
-          clean = clean.lstrip('v')
-          tag = f"v{clean}"
-
-          # Also clean mod_version from leading 'v'
-          mod_version_clean = mod_version.lstrip('v')
-
-          print(f"Mod: {mod_id} v{mod_version_clean}")
-          print(f"Needs Geode: {raw} -> tag: {tag}")
-
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding='utf-8') as f:
-              f.write(f"geode_tag={tag}\n")
-              f.write(f"mod_id={mod_id}\n")
-              f.write(f"mod_version={mod_version_clean}\n")
-              f.write(f"geode_clean={clean}\n")
-
       - name: Download and Install Geode CLI
         env:
           GH_TOKEN: ${{ github.token }}
@@ -82,60 +33,33 @@ jobs:
           New-Item -Path "C:\GeometryDash\geode\mods" -ItemType Directory -Force
           geode profile add --name CI "C:\GeometryDash" win
 
-      - name: Cache Geode SDK
-        id: cache-sdk
-        uses: actions/cache@v4
-        with:
-          path: C:\geode-sdk
-          key: geode-sdk-${{ steps.parse.outputs.geode_tag }}
-
-      - name: Clone Geode SDK
-        if: steps.cache-sdk.outputs.cache-hit != 'true'
+      - name: Clone Mod Repository
         run: |
-          git clone --recursive --branch ${{ steps.parse.outputs.geode_tag }} https://github.com/geode-sdk/geode.git C:\geode-sdk
+          git clone --recursive -b ${{ inputs.mod_branch }} ${{ inputs.mod_repo }} C:\ModSource
 
-      - name: Set SDK Environment
+      - name: Smart Geode SDK Setup
         run: |
+          $jsonPath = if (Test-Path "C:\ModSource\geode.json") { "C:\ModSource\geode.json" } elseif (Test-Path "C:\ModSource\mod.json") { "C:\ModSource\mod.json" } else { throw "mod.json not found!" }
+          $json = Get-Content $jsonPath -Raw | ConvertFrom-Json
+          $rawVersion = $json.geode
+          Write-Host "Mod need Geode: $rawVersion"
+          $cleanVersion = $rawVersion -replace '[>=^~v\s]', ''
+          $tag = "v$cleanVersion"
+          Write-Host "Download binary Geode: $tag"
+          git clone --recursive --branch $tag https://github.com/geode-sdk/geode.git C:\geode-sdk
           echo "GEODE_SDK=C:\geode-sdk" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Install SDK Binaries
-        run: geode sdk install-binaries
+        run: |
+          geode sdk install-binaries
 
-      - name: Install Mod Dependencies
-        working-directory: mod-source
-        continue-on-error: true
-        run: geode install
-
-      - name: Build with geode build
-        id: geode-build
-        working-directory: mod-source
-        continue-on-error: true
+      - name: Compile Mod
+        working-directory: C:\ModSource
         run: |
           geode build --platform windows --config Release
 
-      - name: Fallback - CMake Build
-        if: steps.geode-build.outcome == 'failure'
-        working-directory: mod-source
-        run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DGEODE_TARGET_PLATFORM=Win32 -A Win32
-          cmake --build build --config Release --parallel
-          geode pkg run build/Release
-
-      - name: Find .geode file
-        id: find
-        shell: bash
-        run: |
-          FILE=$(find mod-source/build -name "*.geode" -type f | head -1)
-          if [ -z "$FILE" ]; then
-            echo "No .geode file found!"
-            exit 1
-          fi
-          echo "Found: $FILE"
-          echo "geode_file=$FILE" >> $GITHUB_OUTPUT
-
-      - name: Upload .geode Artifact
+      - name: Upload .geode File
         uses: actions/upload-artifact@v4
         with:
-          name: "${{ steps.parse.outputs.mod_id }}-${{ steps.parse.outputs.mod_version }}"
-          path: ${{ steps.find.outputs.geode_file }}
-          if-no-files-found: error
+          name: Compiled-Geode-Mod
+          path: C:\ModSource\build\**\*.geode
