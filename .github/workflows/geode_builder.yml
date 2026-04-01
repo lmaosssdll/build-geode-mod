@@ -53,7 +53,7 @@ jobs:
       - name: Install SDK Binaries
         run: |
           geode sdk install-binaries
-!
+          
       - name: Compile Mod
         working-directory: C:\ModSource
         run: |
