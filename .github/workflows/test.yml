@@ -18,28 +18,23 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      # 1. Надежное скачивание через официальный GitHub CLI
+      # 1. Скачиваем CLI через официальный GitHub CLI
       - name: Download and Install Geode CLI
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir C:\geode-zip
-          # Качаем архив по маске *win*.zip напрямую из репозитория разработчиков
           gh release download -R geode-sdk/cli -p "*win*.zip" --dir C:\geode-zip
-          
-          # Распаковываем скачанный архив
           Expand-Archive C:\geode-zip\*.zip -DestinationPath C:\geode-cli
-          
-          # Находим, где именно распаковался geode.exe, и добавляем его в систему
           $GeodeDir = (Get-ChildItem -Path C:\geode-cli -Filter "geode.exe" -Recurse).Directory.FullName
-          Write-Host "geode.exe успешно найден в папке: $GeodeDir"
+          Write-Host "geode.exe найден в: $GeodeDir"
           echo "$GeodeDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      # 2. Настраиваем фейковый профиль Geometry Dash (без него компилятор откажется работать)
+      # 2. Настраиваем фейковый профиль GD (НОВЫЙ СИНТАКСИС)
       - name: Setup Geode Profile
         run: |
-          geode profile add CI "C:\GeometryDash"
-          geode profile set CI
+          mkdir C:\GeometryDash
+          geode profile add --name CI "C:\GeometryDash" win
 
       # 3. Клонируем нужный тебе мод
       - name: Clone Mod Repository
