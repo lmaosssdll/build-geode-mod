@@ -1,59 +1,53 @@
-name: Manual Geode Build
+name: Build ANY Geode Mod
 
 on:
   workflow_dispatch:
     inputs:
-      sdk_repo:
-        description: 'Ссылка на репозиторий Geode SDK'
+      mod_repo:
+        description: 'Ссылка на GitHub мода (например: https://github.com/geode-sdk/DevTools.git)'
         required: true
-        default: 'https://github.com/geode-sdk/geode.git'
-      sdk_branch:
-        description: 'Ветка или коммит SDK (например, main)'
+        type: string
+      mod_branch:
+        description: 'Ветка мода (оставь main или master)'
         required: true
         default: 'main'
 
 jobs:
-  build-windows:
-    name: Build Mod (Windows)
+  build:
+    name: Build Mod from URL
     runs-on: windows-latest
 
     steps:
-      # 1. Скачиваем исходники ТВОЕГО мода
-      - name: Checkout Mod Repository
-        uses: actions/checkout@v4
-
-      # 2. Скачиваем и устанавливаем Geode CLI вручную
+      
       - name: Download and Install Geode CLI
         run: |
-          Invoke-WebRequest -Uri https://github.com/geode-sdk/cli/releases/latest/download/geode-cli-windows.zip -OutFile geode-cli.zip
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/geode-sdk/cli/releases/latest"
+          $asset = $release.assets | Where-Object { $_.name -match "windows" -and $_.name -match "\.zip$" }
+          Write-Host "Downloading $($asset.name)..."
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile geode-cli.zip
           Expand-Archive geode-cli.zip -DestinationPath C:\geode-cli
           echo "C:\geode-cli" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      # 3. Клонируем указанный тобой репозиторий Geode SDK
-      - name: Clone Custom Geode SDK
-        run: |
-          git clone -b ${{ github.event.inputs.sdk_branch }} ${{ github.event.inputs.sdk_repo }} C:\geode-sdk
-
-      # 4. Указываем системе, где лежит наш SDK
-      - name: Set GEODE_SDK Environment Variable
-        run: |
-          echo "GEODE_SDK=C:\geode-sdk" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-      # 5. Настраиваем фейковый профиль GD (нужно для CLI, чтобы он не ругался на отсутствие игры)
-      - name: Setup Geode CLI Profile
+     
+      - name: Setup Geode Profile
         run: |
           geode profile add CI "C:\GeometryDash"
           geode profile set CI
 
-      # 6. Собираем мод!
-      # Команда 'geode build' сама вызовет CMake, подцепит твой SDK из C:\geode-sdk и запакует .geode
-      - name: Build Mod using CMake & CLI
+      
+      - name: Clone Mod Repository
+        run: |
+          git clone --recursive -b ${{ inputs.mod_branch }} ${{ inputs.mod_repo }} C:\ModSource
+
+     
+      - name: Compile Mod
+        working-directory: C:\ModSource
         run: |
           geode build --platform windows --config Release
 
-      # 7. Ищем готовый файл .geode и сохраняем его
-      - name: Upload .geode Artifact
+      
+      - name: Upload .geode File
         uses: actions/upload-artifact@v4
         with:
-          name: Mod-Windows-Build
-          path: build/**/*.geode # Ищет файл .geode в папке build
+          name: Compiled-Geode-Mod
+          path: C:\ModSource\build\**\*.geode
