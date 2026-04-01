@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       mod_branch:
-        description: 'Вranch'
+        description: 'Branch'
         required: true
         default: 'main'
 
@@ -27,12 +27,12 @@ jobs:
           Expand-Archive C:\geode-zip\*.zip -DestinationPath C:\geode-cli
           $GeodeDir = (Get-ChildItem -Path C:\geode-cli -Filter "geode.exe" -Recurse).Directory.FullName
           echo "$GeodeDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          
 
-          name: Setup Geode Profile
+      - name: Setup Geode Profile
         run: |
           New-Item -Path "C:\GeometryDash\geode\mods" -ItemType Directory -Force
           geode profile add --name CI "C:\GeometryDash" win
+
       - name: Clone Mod Repository
         run: |
           git clone --recursive -b ${{ inputs.mod_branch }} ${{ inputs.mod_repo }} C:\ModSource
@@ -40,20 +40,19 @@ jobs:
       - name: Smart Geode SDK Setup
         run: |
           $jsonPath = if (Test-Path "C:\ModSource\geode.json") { "C:\ModSource\geode.json" } elseif (Test-Path "C:\ModSource\mod.json") { "C:\ModSource\mod.json" } else { throw "mod.json not found!" }
-          
           $json = Get-Content $jsonPath -Raw | ConvertFrom-Json
           $rawVersion = $json.geode
           Write-Host "Mod need Geode: $rawVersion"
           $cleanVersion = $rawVersion -replace '[>=^~v\s]', ''
           $tag = "v$cleanVersion"
-          Write-Host "Download binary Geode version: $tag"
+          Write-Host "Download binary Geode: $tag"
           git clone --recursive --branch $tag https://github.com/geode-sdk/geode.git C:\geode-sdk
           echo "GEODE_SDK=C:\geode-sdk" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Install SDK Binaries
         run: |
           geode sdk install-binaries
-          
+
       - name: Compile Mod
         working-directory: C:\ModSource
         run: |
