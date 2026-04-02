@@ -1,4 +1,4 @@
-name: Build ANY Geode Mod (Cached)
+\name: Build ANY Geode Mod (Cached & Auto-Fix)
 
 on:
   workflow_dispatch:
@@ -18,36 +18,51 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      # --- НОВЫЙ ШАГ: Очистка URL ---
       - name: Parse Repository URL
         id: repo_parser
         run: |
           $inputRepo = "${{ inputs.mod_repo }}"
-          # Убираем https://github.com/ если пользователь ввел полную ссылку
           $cleanRepo = $inputRepo -replace "^https?://(www\.)?github\.com/", ""
-          # Убираем .git на конце (если есть) и лишние слеши
           $cleanRepo = $cleanRepo -replace "\.git$", ""
           $cleanRepo = $cleanRepo.Trim("/")
           
           Write-Host "Cleaned repository format: $cleanRepo"
           echo "repo=$cleanRepo" >> $env:GITHUB_OUTPUT
           
-          # Создаем безопасный ID для кэша
           $repoId = $cleanRepo -replace '[^a-zA-Z0-9]', '-'
           echo "repo_id=$repoId" >> $env:GITHUB_OUTPUT
 
       - name: Checkout Mod Repository
         uses: actions/checkout@v4
         with:
-          repository: ${{ steps.repo_parser.outputs.repo }} # Используем очищенное имя!
+          repository: ${{ steps.repo_parser.outputs.repo }}
           ref: ${{ inputs.mod_branch }}
           submodules: recursive
           path: ModSource
 
+      # --- ОБНОВЛЕННЫЙ ШАГ АВТО-ИСПРАВЛЕНИЯ ---
+      - name: Auto-fix malformed mod.json & Encoding
+        run: |
+          $jsonPath = if (Test-Path "ModSource\geode.json") { "ModSource\geode.json" } elseif (Test-Path "ModSource\mod.json") { "ModSource\mod.json" } else { throw "mod.json not found!" }
+          $content = Get-Content $jsonPath -Raw
+          
+          # 1. Исправляем пропущенные запятые
+          $pattern = '([\}\]"0-9a-zA-Z])(\s*[\r\n]+\s*)(?="[a-zA-Z0-9\-_]+"\s*:)'
+          $content = [System.Text.RegularExpressions.Regex]::Replace($content, $pattern, '$1,$2')
+          
+          # 2. Удаляем невалидный блок "dependentold", из-за которого крашится парсер Geode
+          $content = [System.Text.RegularExpressions.Regex]::Replace($content, '(?s)"dependentold"\s*:\s*\[.*?\],?\s*', '')
+          
+          # 3. КРИТИЧНО: Сохраняем как UTF-8 БЕЗ BOM (Byte Order Mark), иначе парсер на Rust крашится!
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllText((Resolve-Path $jsonPath).Path, $content, $utf8NoBom)
+          
+          Write-Host "mod.json syntax auto-fixed and saved WITHOUT BOM!"
+
       - name: Parse Mod Configuration
         id: parse_mod
         run: |
-          $jsonPath = if (Test-Path "ModSource\geode.json") { "ModSource\geode.json" } elseif (Test-Path "ModSource\mod.json") { "ModSource\mod.json" } else { throw "mod.json not found!" }
+          $jsonPath = if (Test-Path "ModSource\geode.json") { "ModSource\geode.json" } else { "ModSource\mod.json" }
           $rawContent = Get-Content $jsonPath -Raw
           
           if ($rawContent -match '"geode"\s*:\s*"([^"]+)"') {
@@ -59,7 +74,6 @@ jobs:
           $cleanVersion = $rawVersion -replace '[>=^~v\s]', ''
           $tag = "v$cleanVersion"
           Write-Host "Geode Version required: $tag"
-          
           echo "sdk_version=$tag" >> $env:GITHUB_OUTPUT
 
       # --- 1. КЭШИРОВАНИЕ CLI ---
@@ -118,6 +132,11 @@ jobs:
       - name: Install SDK Binaries
         run: geode sdk install-binaries
 
+      # --- НОВЫЙ ШАГ: ПРЯМАЯ ПРОВЕРКА CLI (Для отладки) ---
+      - name: Validate Geode Project
+        working-directory: ModSource
+        run: geode project check .
+        
       - name: Compile Mod
         working-directory: ModSource
         run: geode build --platform windows --config Release
