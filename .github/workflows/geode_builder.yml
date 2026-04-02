@@ -1,10 +1,10 @@
-name: Build ANY Geode Mod
+name: Build ANY Geode Mod (Cached)
 
 on:
   workflow_dispatch:
     inputs:
       mod_repo:
-        description: 'Mode repo'
+        description: 'Mod repo URL (e.g., https://github.com/user/mod)'
         required: true
         type: string
       mod_branch:
@@ -18,48 +18,99 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: Download and Install Geode CLI
+      - name: Checkout Mod Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.mod_repo }}
+          ref: ${{ inputs.mod_branch }}
+          submodules: recursive
+          path: ModSource
+
+      - name: Parse Mod Configuration
+        id: parse_mod
+        run: |
+          $jsonPath = if (Test-Path "ModSource\geode.json") { "ModSource\geode.json" } elseif (Test-Path "ModSource\mod.json") { "ModSource\mod.json" } else { throw "mod.json not found!" }
+          $rawContent = Get-Content $jsonPath -Raw
+          
+          if ($rawContent -match '"geode"\s*:\s*"([^"]+)"') {
+              $rawVersion = $matches[1]
+          } else {
+              throw "Failed to find 'geode' version in $jsonPath"
+          }
+          
+          $cleanVersion = $rawVersion -replace '[>=^~v\s]', ''
+          $tag = "v$cleanVersion"
+          Write-Host "Geode Version required: $tag"
+          
+          # Передаем версию в Output для использования в кэше
+          echo "sdk_version=$tag" >> $env:GITHUB_OUTPUT
+          
+          # Создаем безопасный ID из URL репозитория для кэша сборки
+          $repoId = "${{ inputs.mod_repo }}" -replace '[^a-zA-Z0-9]', '-'
+          echo "repo_id=$repoId" >> $env:GITHUB_OUTPUT
+
+      # --- 1. КЭШИРОВАНИЕ CLI ---
+      - name: Cache Geode CLI
+        id: cache-cli
+        uses: actions/cache@v4
+        with:
+          path: geode-cli
+          key: geode-cli-windows-latest
+
+      - name: Download Geode CLI (If not cached)
+        if: steps.cache-cli.outputs.cache-hit != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir C:\geode-zip
-          gh release download -R geode-sdk/cli -p "*win*.zip" --dir C:\geode-zip
-          Expand-Archive C:\geode-zip\*.zip -DestinationPath C:\geode-cli
-          $GeodeDir = (Get-ChildItem -Path C:\geode-cli -Filter "geode.exe" -Recurse).Directory.FullName
-          echo "$GeodeDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          mkdir geode-zip
+          gh release download -R geode-sdk/cli -p "*win*.zip" --dir geode-zip
+          Expand-Archive geode-zip\*.zip -DestinationPath geode-cli
 
-      - name: Setup Geode Profile
+      - name: Add CLI to PATH and Setup Profile
         run: |
+          $GeodeDir = (Get-ChildItem -Path geode-cli -Filter "geode.exe" -Recurse).Directory.FullName
+          echo "$GeodeDir" >> $env:GITHUB_PATH
           New-Item -Path "C:\GeometryDash\geode\mods" -ItemType Directory -Force
-          geode profile add --name CI "C:\GeometryDash" win
+          & "$GeodeDir\geode.exe" profile add --name CI "C:\GeometryDash" win
 
-      - name: Clone Mod Repository
-        run: |
-          git clone --recursive -b ${{ inputs.mod_branch }} ${{ inputs.mod_repo }} C:\ModSource
+      # --- 2. КЭШИРОВАНИЕ SDK ---
+      - name: Cache Geode SDK
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: geode-sdk
+          key: geode-sdk-windows-${{ steps.parse_mod.outputs.sdk_version }}
 
-      - name: Smart Geode SDK Setup
+      - name: Clone Geode SDK (If not cached)
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
         run: |
-          $jsonPath = if (Test-Path "C:\ModSource\geode.json") { "C:\ModSource\geode.json" } elseif (Test-Path "C:\ModSource\mod.json") { "C:\ModSource\mod.json" } else { throw "mod.json not found!" }
-          $json = Get-Content $jsonPath -Raw | ConvertFrom-Json
-          $rawVersion = $json.geode
-          Write-Host "Mod need Geode: $rawVersion"
-          $cleanVersion = $rawVersion -replace '[>=^~v\s]', ''
-          $tag = "v$cleanVersion"
-          Write-Host "Download binary Geode: $tag"
-          git clone --recursive --branch $tag https://github.com/geode-sdk/geode.git C:\geode-sdk
-          echo "GEODE_SDK=C:\geode-sdk" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          git clone --recursive --branch ${{ steps.parse_mod.outputs.sdk_version }} https://github.com/geode-sdk/geode.git geode-sdk
+
+      - name: Setup SDK Environment Variables
+        run: |
+          $sdkPath = Resolve-Path "geode-sdk"
+          echo "GEODE_SDK=$sdkPath" >> $env:GITHUB_ENV
+
+      # --- 3. КЭШИРОВАНИЕ СБОРКИ C++ ---
+      - name: Cache CMake Build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ModSource/build
+            ModSource/.geode
+          key: build-win-${{ steps.parse_mod.outputs.repo_id }}-${{ github.run_id }}
+          restore-keys: |
+            build-win-${{ steps.parse_mod.outputs.repo_id }}-
 
       - name: Install SDK Binaries
-        run: |
-          geode sdk install-binaries
+        run: geode sdk install-binaries
 
       - name: Compile Mod
-        working-directory: C:\ModSource
-        run: |
-          geode build --platform windows --config Release
+        working-directory: ModSource
+        run: geode build --platform windows --config Release
 
       - name: Upload .geode File
         uses: actions/upload-artifact@v4
         with:
           name: Compiled-Geode-Mod
-          path: C:\ModSource\build\**\*.geode
+          path: ModSource/build/**/*.geode
