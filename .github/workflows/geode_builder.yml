@@ -11,7 +11,7 @@ on:
         description: 'Branch'
         required: true
         default: 'main'
-      platform: # <-- 1. СЮДА ЮЗЕР ВПИСЫВАЕТ ПЛАТФОРМУ (win, android32, android64)
+      platform: 
         description: 'Platform (win, android32, android64)'
         required: true
         type: string
@@ -45,20 +45,15 @@ jobs:
           submodules: recursive
           path: ModSource
 
-      # --- ОБНОВЛЕННЫЙ ШАГ АВТО-ИСПРАВЛЕНИЯ ---
       - name: Auto-fix malformed mod.json & Encoding
         run: |
           $jsonPath = if (Test-Path "ModSource\geode.json") { "ModSource\geode.json" } elseif (Test-Path "ModSource\mod.json") { "ModSource\mod.json" } else { throw "mod.json not found!" }
           $content = Get-Content $jsonPath -Raw
           
-          # 1. Исправляем пропущенные запятые
           $pattern = '([\}\]"0-9a-zA-Z])(\s*[\r\n]+\s*)(?="[a-zA-Z0-9\-_]+"\s*:)'
           $content = [System.Text.RegularExpressions.Regex]::Replace($content, $pattern, '$1,$2')
-          
-          # 2. Удаляем невалидный блок "dependentold", из-за которого крашится парсер Geode
           $content = [System.Text.RegularExpressions.Regex]::Replace($content, '(?s)"dependentold"\s*:\s*\[.*?\],?\s*', '')
           
-          # 3. КРИТИЧНО: Сохраняем как UTF-8 БЕЗ BOM (Byte Order Mark), иначе парсер на Rust крашится!
           $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
           [System.IO.File]::WriteAllText((Resolve-Path $jsonPath).Path, $content, $utf8NoBom)
           
@@ -81,7 +76,6 @@ jobs:
           Write-Host "Geode Version required: $tag"
           echo "sdk_version=$tag" >> $env:GITHUB_OUTPUT
 
-      # --- 1. КЭШИРОВАНИЕ CLI ---
       - name: Cache Geode CLI
         id: cache-cli
         uses: actions/cache@v4
@@ -105,7 +99,6 @@ jobs:
           New-Item -Path "C:\GeometryDash\geode\mods" -ItemType Directory -Force
           & "$GeodeDir\geode.exe" profile add --name CI "C:\GeometryDash" win
 
-      # --- 2. КЭШИРОВАНИЕ SDK ---
       - name: Cache Geode SDK
         id: cache-sdk
         uses: actions/cache@v4
@@ -123,14 +116,28 @@ jobs:
           $sdkPath = Resolve-Path "geode-sdk"
           echo "GEODE_SDK=$sdkPath" >> $env:GITHUB_ENV
 
-      # --- ИСПРАВЛЕНИЕ ОШИБКИ CLANG 19 ---
+      # --- ИСПРАВЛЕНИЕ ОШИБКИ CLANG 19 ДЛЯ WINDOWS ---
       - name: Install LLVM/Clang 19
         uses: KyleMayes/install-llvm-action@v2
         with:
           version: "19.1"
-      # -----------------------------------
+          env: true # <-- МАГИЯ ЗДЕСЬ. Заставляет CMake видеть версию 19.1
+      # -----------------------------------------------
 
-      # --- 3. КЭШИРОВАНИЕ СБОРКИ C++ ---
+      # --- БЕЗ ЭТОГО СБОРКА АНДРОИДА УПАДЕТ С ТОЙ ЖЕ ОШИБКОЙ ---
+      - name: Setup Android NDK
+        if: contains(inputs.platform, 'android')
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r27b # Официальная версия под Geode v3+
+          add-to-path: false
+
+      - name: Set Android Environment Variable
+        if: contains(inputs.platform, 'android')
+        run: echo "ANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }}" >> $env:GITHUB_ENV
+      # ---------------------------------------------------------
+
       - name: Cache CMake Build
         uses: actions/cache@v4
         with:
@@ -142,17 +149,14 @@ jobs:
             build-${{ inputs.platform }}-${{ steps.repo_parser.outputs.repo_id }}-
 
       - name: Install SDK Binaries
-        # Добавил сюда тоже флаг, чтобы он скачивал бинарники для правильной платформы
         run: geode sdk install-binaries --platform ${{ inputs.platform }}
 
-      # --- ПРЯМАЯ ПРОВЕРКА CLI (Для отладки) ---
       - name: Validate Geode Project
         working-directory: ModSource
         run: geode project check .
         
       - name: Compile Mod
         working-directory: ModSource
-        # <-- 2. СЮДА ПОДСТАВЛЯЕТСЯ ТО, ЧТО ВВЕЛ ЮЗЕР
         run: geode build --platform ${{ inputs.platform }} --config Release
 
       - name: Upload .geode File
