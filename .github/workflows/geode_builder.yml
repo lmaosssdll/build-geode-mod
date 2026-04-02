@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       mod_repo:
-        description: 'Mod repo URL (e.g., https://github.com/user/mod)'
+        description: 'Mod repo (URL or owner/repo)'
         required: true
         type: string
       mod_branch:
@@ -18,10 +18,28 @@ jobs:
     runs-on: windows-latest
 
     steps:
+      # --- НОВЫЙ ШАГ: Очистка URL ---
+      - name: Parse Repository URL
+        id: repo_parser
+        run: |
+          $inputRepo = "${{ inputs.mod_repo }}"
+          # Убираем https://github.com/ если пользователь ввел полную ссылку
+          $cleanRepo = $inputRepo -replace "^https?://(www\.)?github\.com/", ""
+          # Убираем .git на конце (если есть) и лишние слеши
+          $cleanRepo = $cleanRepo -replace "\.git$", ""
+          $cleanRepo = $cleanRepo.Trim("/")
+          
+          Write-Host "Cleaned repository format: $cleanRepo"
+          echo "repo=$cleanRepo" >> $env:GITHUB_OUTPUT
+          
+          # Создаем безопасный ID для кэша
+          $repoId = $cleanRepo -replace '[^a-zA-Z0-9]', '-'
+          echo "repo_id=$repoId" >> $env:GITHUB_OUTPUT
+
       - name: Checkout Mod Repository
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.mod_repo }}
+          repository: ${{ steps.repo_parser.outputs.repo }} # Используем очищенное имя!
           ref: ${{ inputs.mod_branch }}
           submodules: recursive
           path: ModSource
@@ -42,12 +60,7 @@ jobs:
           $tag = "v$cleanVersion"
           Write-Host "Geode Version required: $tag"
           
-          # Передаем версию в Output для использования в кэше
           echo "sdk_version=$tag" >> $env:GITHUB_OUTPUT
-          
-          # Создаем безопасный ID из URL репозитория для кэша сборки
-          $repoId = "${{ inputs.mod_repo }}" -replace '[^a-zA-Z0-9]', '-'
-          echo "repo_id=$repoId" >> $env:GITHUB_OUTPUT
 
       # --- 1. КЭШИРОВАНИЕ CLI ---
       - name: Cache Geode CLI
@@ -98,9 +111,9 @@ jobs:
           path: |
             ModSource/build
             ModSource/.geode
-          key: build-win-${{ steps.parse_mod.outputs.repo_id }}-${{ github.run_id }}
+          key: build-win-${{ steps.repo_parser.outputs.repo_id }}-${{ github.run_id }}
           restore-keys: |
-            build-win-${{ steps.parse_mod.outputs.repo_id }}-
+            build-win-${{ steps.repo_parser.outputs.repo_id }}-
 
       - name: Install SDK Binaries
         run: geode sdk install-binaries
