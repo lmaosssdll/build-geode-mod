@@ -139,7 +139,7 @@ jobs:
         
       - name: Compile Mod
         working-directory: ModSource
-        run: geode build --platform windows --config Release
+        run: geode build --platform android --config Release
 
       - name: Upload .geode File
         uses: actions/upload-artifact@v4
