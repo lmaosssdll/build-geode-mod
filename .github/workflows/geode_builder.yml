@@ -116,31 +116,32 @@ jobs:
           $sdkPath = Resolve-Path "geode-sdk"
           echo "GEODE_SDK=$sdkPath" >> $env:GITHUB_ENV
 
-      # --- ИСПРАВЛЕНИЕ ОШИБКИ CLANG 19 ДЛЯ WINDOWS CMAKE ---
-      - name: Install LLVM/Clang 19
-        id: llvm
-        uses: KyleMayes/install-llvm-action@v2
-        with:
-          version: "19.1"
-          env: true
-
-      - name: Force Visual Studio & CMake to use new Clang
+      # --- 1. ЖЕСТКОЕ РЕШЕНИЕ CLANG 19 ДЛЯ WINDOWS СБОРКИ ---
+      - name: Install LLVM 19 (Windows)
+        if: inputs.platform == 'win'
         run: |
-          # Эта строчка заставляет CMake на Windows смотреть в папку нового Clang
-          echo "LLVMInstallDir=${{ steps.llvm.outputs.path }}" >> $env:GITHUB_ENV
+          Write-Host "Downloading LLVM 19.1.0..."
+          curl.exe -fsSL -o LLVM.exe https://github.com/llvm/llvm-project/releases/download/llvmorg-19.1.0/LLVM-19.1.0-win64.exe
+          Write-Host "Extracting LLVM..."
+          7z x LLVM.exe -oC:\LLVM
+          echo "C:\LLVM\bin" >> $env:GITHUB_PATH
+          echo "LLVMInstallDir=C:\LLVM" >> $env:GITHUB_ENV
       # ------------------------------------------------------
 
+      # --- 2. ЖЕСТКОЕ РЕШЕНИЕ CLANG 19 ДЛЯ ANDROID СБОРКИ ---
       - name: Setup Android NDK
         if: contains(inputs.platform, 'android')
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
-          ndk-version: r26d
+          # В NDK r28 встроен нужный нам Clang 19!
+          ndk-version: r28
           add-to-path: false
 
       - name: Set Android Environment Variable
         if: contains(inputs.platform, 'android')
         run: echo "ANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }}" >> $env:GITHUB_ENV
+      # ------------------------------------------------------
 
       - name: Cache CMake Build
         uses: actions/cache@v4
