@@ -1,4 +1,4 @@
-\name: Build ANY Geode Mod (Cached & Auto-Fix)
+name: Build ANY Geode Mod (Cached & Auto-Fix)
 
 on:
   workflow_dispatch:
