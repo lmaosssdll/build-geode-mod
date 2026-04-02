@@ -142,11 +142,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ModSource/build
+            ModSource/build*
             ModSource/.geode
-          key: build-v3-${{ inputs.platform }}-${{ steps.repo_parser.outputs.repo_id }}-${{ github.run_id }}
+          key: build-v4-${{ inputs.platform }}-${{ steps.repo_parser.outputs.repo_id }}-${{ github.run_id }}
           restore-keys: |
-            build-v3-${{ inputs.platform }}-${{ steps.repo_parser.outputs.repo_id }}-
+            build-v4-${{ inputs.platform }}-${{ steps.repo_parser.outputs.repo_id }}-
 
       - name: Install SDK Binaries
         run: geode sdk install-binaries --platform ${{ inputs.platform }}
@@ -155,13 +155,11 @@ jobs:
         working-directory: ModSource
         run: geode project check .
         
-      # --- 1. ПЕРВЫЙ ЗАПУСК СБОРКИ (ОНА УПАДЕТ, НО СКАЧАЕТ БИБЛИОТЕКУ) ---
       - name: Compile Mod (Initial Run)
         working-directory: ModSource
-        continue-on-error: true # <-- Игнорируем ошибку!
+        continue-on-error: true
         run: geode build --platform ${{ inputs.platform }} --config Release
 
-      # --- 2. ВЛЕТАЕМ И ЧИНИМ СКАЧАННЫЙ ФАЙЛ ---
       - name: Auto-Patch NDK r28 bug in Dependency
         working-directory: ModSource
         run: |
@@ -179,13 +177,15 @@ jobs:
               Write-Host "Buggy file not generated or not found. Skipping patch."
           }
 
-      # --- 3. ВТОРОЙ ЗАПУСК СБОРКИ (ПРОДОЛЖАЕТ И ЗАВЕРШАЕТСЯ УСПЕШНО) ---
       - name: Compile Mod (Final Run)
         working-directory: ModSource
         run: geode build --platform ${{ inputs.platform }} --config Release
 
+      # --- ВОТ ИСПРАВЛЕНИЕ: ИЩЕМ ВО ВСЕХ ПАПКАХ BUILD ---
       - name: Upload .geode File
         uses: actions/upload-artifact@v4
         with:
           name: Compiled-Geode-Mod-${{ inputs.platform }}
-          path: ModSource/build/**/*.geode
+          path: |
+            ModSource/build/**/*.geode
+            ModSource/build-${{ inputs.platform }}/**/*.geode
