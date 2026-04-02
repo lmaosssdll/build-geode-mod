@@ -116,7 +116,6 @@ jobs:
           $sdkPath = Resolve-Path "geode-sdk"
           echo "GEODE_SDK=$sdkPath" >> $env:GITHUB_ENV
 
-      # --- 1. ЖЕСТКОЕ РЕШЕНИЕ CLANG 19 ДЛЯ WINDOWS СБОРКИ ---
       - name: Install LLVM 19 (Windows)
         if: inputs.platform == 'win'
         run: |
@@ -126,22 +125,18 @@ jobs:
           7z x LLVM.exe -oC:\LLVM
           echo "C:\LLVM\bin" >> $env:GITHUB_PATH
           echo "LLVMInstallDir=C:\LLVM" >> $env:GITHUB_ENV
-      # ------------------------------------------------------
 
-      # --- 2. ЖЕСТКОЕ РЕШЕНИЕ CLANG 19 ДЛЯ ANDROID СБОРКИ ---
       - name: Setup Android NDK
         if: contains(inputs.platform, 'android')
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
-          # В NDK r28 встроен нужный нам Clang 19!
           ndk-version: r28
           add-to-path: false
 
       - name: Set Android Environment Variable
         if: contains(inputs.platform, 'android')
         run: echo "ANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }}" >> $env:GITHUB_ENV
-      # ------------------------------------------------------
 
       - name: Cache CMake Build
         uses: actions/cache@v4
@@ -149,9 +144,9 @@ jobs:
           path: |
             ModSource/build
             ModSource/.geode
-          key: build-${{ inputs.platform }}-${{ steps.repo_parser.outputs.repo_id }}-${{ github.run_id }}
+          key: build-v3-${{ inputs.platform }}-${{ steps.repo_parser.outputs.repo_id }}-${{ github.run_id }}
           restore-keys: |
-            build-${{ inputs.platform }}-${{ steps.repo_parser.outputs.repo_id }}-
+            build-v3-${{ inputs.platform }}-${{ steps.repo_parser.outputs.repo_id }}-
 
       - name: Install SDK Binaries
         run: geode sdk install-binaries --platform ${{ inputs.platform }}
@@ -160,7 +155,32 @@ jobs:
         working-directory: ModSource
         run: geode project check .
         
-      - name: Compile Mod
+      # --- 1. ПЕРВЫЙ ЗАПУСК СБОРКИ (ОНА УПАДЕТ, НО СКАЧАЕТ БИБЛИОТЕКУ) ---
+      - name: Compile Mod (Initial Run)
+        working-directory: ModSource
+        continue-on-error: true # <-- Игнорируем ошибку!
+        run: geode build --platform ${{ inputs.platform }} --config Release
+
+      # --- 2. ВЛЕТАЕМ И ЧИНИМ СКАЧАННЫЙ ФАЙЛ ---
+      - name: Auto-Patch NDK r28 bug in Dependency
+        working-directory: ModSource
+        run: |
+          $buggyFile = "build-${{ inputs.platform }}\_deps\nontype_functional-src\include\std23\move_only_function.h"
+          if (Test-Path $buggyFile) {
+              $content = Get-Content $buggyFile -Raw
+              if (-not ($content -match "<type_traits>")) {
+                  Write-Host "File found! Injecting <type_traits> fix..."
+                  $content = "#include <type_traits>`n" + $content
+                  Set-Content $buggyFile $content
+              } else {
+                  Write-Host "File is already patched."
+              }
+          } else {
+              Write-Host "Buggy file not generated or not found. Skipping patch."
+          }
+
+      # --- 3. ВТОРОЙ ЗАПУСК СБОРКИ (ПРОДОЛЖАЕТ И ЗАВЕРШАЕТСЯ УСПЕШНО) ---
+      - name: Compile Mod (Final Run)
         working-directory: ModSource
         run: geode build --platform ${{ inputs.platform }} --config Release
 
